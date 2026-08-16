@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# macOS
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
+
+# Dataset
+data/
+dataset/
+
+# Trained models
+models/*.pth
+models/*.pt
+models/*.ckpt
+
+# Logs
+*.log
+
+# Streamlit
+.streamlit/secrets.toml
