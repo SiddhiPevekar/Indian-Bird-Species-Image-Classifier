@@ -1,6 +1,21 @@
 from pathlib import Path
 import torch
+import os
 
+# =========================================================
+# PROJECT PATHS
+# =========================================================
+
+# PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# DATA_DIR = PROJECT_ROOT / "data"
+# DATASET_DIR = DATA_DIR / "Birds_25"
+
+# SOURCE_TRAIN_DIR = DATASET_DIR / "train"
+# VAL_DIR = DATASET_DIR / "valid"
+
+# MODEL_DIR = PROJECT_ROOT / "models"
+# RESULTS_DIR = PROJECT_ROOT / "results"
 
 # =========================================================
 # PROJECT PATHS
@@ -8,8 +23,22 @@ import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-DATA_DIR = PROJECT_ROOT / "data"
-DATASET_DIR = DATA_DIR / "Birds_25"
+# ---------------------------------------------------------
+# Dataset path
+#
+# Local Mac default:
+#   project/data/Birds_25
+#
+# Kaggle:
+#   supplied using BIRD_DATASET_DIR environment variable
+# ---------------------------------------------------------
+
+DATASET_DIR = Path(
+    os.getenv(
+        "BIRD_DATASET_DIR",
+        PROJECT_ROOT / "data" / "Birds_25",
+    )
+)
 
 SOURCE_TRAIN_DIR = DATASET_DIR / "train"
 VAL_DIR = DATASET_DIR / "valid"
@@ -56,7 +85,10 @@ BATCH_SIZE = 32
 # =========================================================
 
 # Keep this conservative on macOS initially.
-NUM_WORKERS = 0
+# NUM_WORKERS = 0
+NUM_WORKERS = int(
+    os.getenv("NUM_WORKERS", "0")
+)
 
 
 # =========================================================

@@ -1,3 +1,4 @@
+import argparse
 import time
 
 import matplotlib.pyplot as plt
@@ -9,13 +10,12 @@ from src.config import (
     DEVICE,
     MODEL_DIR,
     RESULTS_DIR,
-    RESNET_EPOCHS,
     LEARNING_RATE,
     WEIGHT_DECAY,
 )
 
 from src.data import create_dataloaders
-from src.models import build_resnet50
+from src.models import build_model
 
 
 # =========================================================
@@ -28,15 +28,7 @@ def train_one_epoch(
     criterion,
     optimizer,
 ):
-    """
-    Trains the model for one complete epoch.
 
-    Returns:
-        average training loss
-        training accuracy
-    """
-
-    # Enable training behaviour.
     model.train()
 
     running_loss = 0.0
@@ -51,31 +43,20 @@ def train_one_epoch(
 
     for images, labels in progress_bar:
 
-        # Move images and labels to MPS / CUDA / CPU.
         images = images.to(DEVICE)
         labels = labels.to(DEVICE)
 
-        # Clear gradients from previous batch.
         optimizer.zero_grad()
 
-        # Forward pass.
         outputs = model(images)
 
-        # Calculate classification loss.
         loss = criterion(
             outputs,
             labels,
         )
 
-        # Backpropagation.
         loss.backward()
-
-        # Update trainable parameters.
         optimizer.step()
-
-        # -------------------------------------------------
-        # Statistics
-        # -------------------------------------------------
 
         batch_size = images.size(0)
 
@@ -83,9 +64,7 @@ def train_one_epoch(
             loss.item() * batch_size
         )
 
-        predictions = outputs.argmax(
-            dim=1
-        )
+        predictions = outputs.argmax(dim=1)
 
         correct_predictions += (
             predictions == labels
@@ -93,34 +72,24 @@ def train_one_epoch(
 
         total_samples += batch_size
 
-        current_accuracy = (
-            correct_predictions
-            / total_samples
-        )
-
         progress_bar.set_postfix(
             loss=f"{loss.item():.4f}",
-            accuracy=f"{current_accuracy:.4f}",
+            accuracy=f"{correct_predictions / total_samples:.4f}",
         )
 
     epoch_loss = (
-        running_loss
-        / total_samples
+        running_loss / total_samples
     )
 
     epoch_accuracy = (
-        correct_predictions
-        / total_samples
+        correct_predictions / total_samples
     )
 
-    return (
-        epoch_loss,
-        epoch_accuracy,
-    )
+    return epoch_loss, epoch_accuracy
 
 
 # =========================================================
-# VALIDATE MODEL
+# VALIDATION
 # =========================================================
 
 def validate(
@@ -128,11 +97,6 @@ def validate(
     dataloader,
     criterion,
 ):
-    """
-    Evaluates the model on the validation dataset.
-
-    No gradient updates happen here.
-    """
 
     model.eval()
 
@@ -140,21 +104,17 @@ def validate(
     correct_predictions = 0
     total_samples = 0
 
-    progress_bar = tqdm(
-        dataloader,
-        desc="Validation",
-        leave=False,
-    )
-
-    # Disable gradient computation.
     with torch.no_grad():
 
-        for images, labels in progress_bar:
+        for images, labels in tqdm(
+            dataloader,
+            desc="Validation",
+            leave=False,
+        ):
 
             images = images.to(DEVICE)
             labels = labels.to(DEVICE)
 
-            # Forward pass only.
             outputs = model(images)
 
             loss = criterion(
@@ -168,9 +128,7 @@ def validate(
                 loss.item() * batch_size
             )
 
-            predictions = outputs.argmax(
-                dim=1
-            )
+            predictions = outputs.argmax(dim=1)
 
             correct_predictions += (
                 predictions == labels
@@ -179,41 +137,33 @@ def validate(
             total_samples += batch_size
 
     epoch_loss = (
-        running_loss
-        / total_samples
+        running_loss / total_samples
     )
 
     epoch_accuracy = (
-        correct_predictions
-        / total_samples
+        correct_predictions / total_samples
     )
 
-    return (
-        epoch_loss,
-        epoch_accuracy,
-    )
+    return epoch_loss, epoch_accuracy
 
 
 # =========================================================
-# PLOT TRAINING HISTORY
+# SAVE CURVES
 # =========================================================
 
-def plot_training_history(
+def save_training_curves(
+    model_name,
     train_losses,
     val_losses,
     train_accuracies,
     val_accuracies,
 ):
-    """
-    Saves training and validation curves.
-    """
 
-    output_directory = (
-        RESULTS_DIR
-        / "training_curves"
+    output_dir = (
+        RESULTS_DIR / "training_curves"
     )
 
-    output_directory.mkdir(
+    output_dir.mkdir(
         parents=True,
         exist_ok=True,
     )
@@ -223,10 +173,7 @@ def plot_training_history(
         len(train_losses) + 1,
     )
 
-    # -----------------------------------------------------
-    # LOSS CURVE
-    # -----------------------------------------------------
-
+    # Loss
     plt.figure()
 
     plt.plot(
@@ -243,21 +190,17 @@ def plot_training_history(
 
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
-    plt.title("ResNet50 Loss")
+    plt.title(f"{model_name} Loss")
     plt.legend()
 
     plt.savefig(
-        output_directory
-        / "resnet50_loss.png",
+        output_dir / f"{model_name}_loss.png",
         bbox_inches="tight",
     )
 
     plt.close()
 
-    # -----------------------------------------------------
-    # ACCURACY CURVE
-    # -----------------------------------------------------
-
+    # Accuracy
     plt.figure()
 
     plt.plot(
@@ -274,12 +217,11 @@ def plot_training_history(
 
     plt.xlabel("Epoch")
     plt.ylabel("Accuracy")
-    plt.title("ResNet50 Accuracy")
+    plt.title(f"{model_name} Accuracy")
     plt.legend()
 
     plt.savefig(
-        output_directory
-        / "resnet50_accuracy.png",
+        output_dir / f"{model_name}_accuracy.png",
         bbox_inches="tight",
     )
 
@@ -287,19 +229,24 @@ def plot_training_history(
 
 
 # =========================================================
-# TRAIN RESNET50
+# GENERIC MODEL TRAINER
 # =========================================================
 
-def train_resnet50():
+def train_model(
+    model_name,
+    epochs,
+):
 
-    print("\n========== RESNET50 TRAINING ==========\n")
+    print(
+        f"\n========== {model_name.upper()} TRAINING ==========\n"
+    )
 
     print(f"Device: {DEVICE}")
-    print(f"Epochs: {RESNET_EPOCHS}")
+    print(f"Epochs: {epochs}")
     print(f"Learning rate: {LEARNING_RATE}")
 
     # -----------------------------------------------------
-    # Load dataset
+    # Data
     # -----------------------------------------------------
 
     (
@@ -308,52 +255,47 @@ def train_resnet50():
         _,
         class_names,
         _,
-    ) = create_dataloaders()
-
-    print(
-        f"Training images: "
-        f"{len(train_loader.dataset)}"
+    ) = create_dataloaders(
+        model_name
     )
 
     print(
-        f"Validation images: "
-        f"{len(val_loader.dataset)}"
+        f"Training images: {len(train_loader.dataset)}"
     )
 
     print(
-        f"Classes: "
-        f"{len(class_names)}"
+        f"Validation images: {len(val_loader.dataset)}"
+    )
+
+    print(
+        f"Classes: {len(class_names)}"
     )
 
     # -----------------------------------------------------
-    # Build model
+    # Build selected model
     # -----------------------------------------------------
 
-    model = build_resnet50(
-        freeze_backbone=True
+    model = build_model(
+        model_name=model_name,
+        freeze_backbone=True,
+        pretrained=True,
     )
 
     model = model.to(DEVICE)
 
     # -----------------------------------------------------
-    # Loss function
+    # Loss
     # -----------------------------------------------------
 
     criterion = nn.CrossEntropyLoss()
 
     # -----------------------------------------------------
-    # Optimizer
-    #
-    # Only parameters with requires_grad=True are supplied.
-    #
-    # Because the backbone is frozen, this means AdamW
-    # updates only our new classifier.
+    # Only train unfrozen parameters
     # -----------------------------------------------------
 
     optimizer = torch.optim.AdamW(
         filter(
-            lambda parameter:
-            parameter.requires_grad,
+            lambda parameter: parameter.requires_grad,
             model.parameters(),
         ),
         lr=LEARNING_RATE,
@@ -361,7 +303,7 @@ def train_resnet50():
     )
 
     # -----------------------------------------------------
-    # Output directory
+    # Checkpoint path
     # -----------------------------------------------------
 
     MODEL_DIR.mkdir(
@@ -371,12 +313,10 @@ def train_resnet50():
 
     model_path = (
         MODEL_DIR
-        / "resnet50_best.pth"
+        / f"{model_name}_best.pth"
     )
 
-    # -----------------------------------------------------
-    # History
-    # -----------------------------------------------------
+    best_validation_accuracy = 0.0
 
     train_losses = []
     val_losses = []
@@ -384,57 +324,36 @@ def train_resnet50():
     train_accuracies = []
     val_accuracies = []
 
-    best_validation_accuracy = 0.0
-
     total_start_time = time.time()
 
     # =====================================================
-    # TRAINING LOOP
+    # TRAINING
     # =====================================================
 
-    for epoch in range(
-        RESNET_EPOCHS
-    ):
+    for epoch in range(epochs):
 
         print(
-            f"\nEpoch "
-            f"{epoch + 1}/{RESNET_EPOCHS}"
+            f"\nEpoch {epoch + 1}/{epochs}"
         )
 
         print("-" * 40)
 
-        epoch_start_time = time.time()
+        epoch_start = time.time()
 
-        # -------------------------------------------------
-        # Training
-        # -------------------------------------------------
-
-        (
-            train_loss,
-            train_accuracy,
-        ) = train_one_epoch(
-            model,
-            train_loader,
-            criterion,
-            optimizer,
+        train_loss, train_accuracy = (
+            train_one_epoch(
+                model,
+                train_loader,
+                criterion,
+                optimizer,
+            )
         )
 
-        # -------------------------------------------------
-        # Validation
-        # -------------------------------------------------
-
-        (
-            val_loss,
-            val_accuracy,
-        ) = validate(
+        val_loss, val_accuracy = validate(
             model,
             val_loader,
             criterion,
         )
-
-        # -------------------------------------------------
-        # Save history
-        # -------------------------------------------------
 
         train_losses.append(
             train_loss
@@ -453,43 +372,34 @@ def train_resnet50():
         )
 
         epoch_time = (
-            time.time()
-            - epoch_start_time
+            time.time() - epoch_start
         )
 
         print(
-            f"Train Loss: "
-            f"{train_loss:.4f}"
+            f"Train Loss: {train_loss:.4f}"
         )
 
         print(
-            f"Train Accuracy: "
-            f"{train_accuracy:.4f}"
+            f"Train Accuracy: {train_accuracy:.4f}"
         )
 
         print(
-            f"Validation Loss: "
-            f"{val_loss:.4f}"
+            f"Validation Loss: {val_loss:.4f}"
         )
 
         print(
-            f"Validation Accuracy: "
-            f"{val_accuracy:.4f}"
+            f"Validation Accuracy: {val_accuracy:.4f}"
         )
 
         print(
-            f"Epoch Time: "
-            f"{epoch_time / 60:.2f} minutes"
+            f"Epoch Time: {epoch_time / 60:.2f} minutes"
         )
 
         # -------------------------------------------------
-        # SAVE BEST MODEL
+        # Save best checkpoint
         # -------------------------------------------------
 
-        if (
-            val_accuracy
-            > best_validation_accuracy
-        ):
+        if val_accuracy > best_validation_accuracy:
 
             best_validation_accuracy = (
                 val_accuracy
@@ -501,24 +411,19 @@ def train_resnet50():
             )
 
             print(
-                "Saved new best model:"
+                f"Saved best checkpoint: {model_path}"
             )
-
-            print(
-                model_path
-            )
-
-    # =====================================================
-    # TRAINING FINISHED
-    # =====================================================
 
     total_time = (
-        time.time()
-        - total_start_time
+        time.time() - total_start_time
     )
 
     print(
         "\n========== TRAINING COMPLETE ==========\n"
+    )
+
+    print(
+        f"Model: {model_name}"
     )
 
     print(
@@ -532,15 +437,11 @@ def train_resnet50():
     )
 
     print(
-        f"Best Model: "
-        f"{model_path}"
+        f"Checkpoint: {model_path}"
     )
 
-    # -----------------------------------------------------
-    # Save graphs
-    # -----------------------------------------------------
-
-    plot_training_history(
+    save_training_curves(
+        model_name,
         train_losses,
         val_losses,
         train_accuracies,
@@ -549,9 +450,45 @@ def train_resnet50():
 
 
 # =========================================================
+# COMMAND LINE ARGUMENTS
+# =========================================================
+
+def parse_arguments():
+
+    parser = argparse.ArgumentParser(
+        description="Train Indian bird classifier"
+    )
+
+    parser.add_argument(
+        "--model",
+        type=str,
+        required=True,
+        choices=[
+            "resnet50",
+            "efficientnet_v2_b0",
+            "mobilenet_v2",
+            "vit_b32",
+        ],
+    )
+
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=3,
+    )
+
+    return parser.parse_args()
+
+
+# =========================================================
 # MAIN
 # =========================================================
 
 if __name__ == "__main__":
 
-    train_resnet50()
+    args = parse_arguments()
+
+    train_model(
+        model_name=args.model,
+        epochs=args.epochs,
+    )

@@ -15,17 +15,19 @@ from src.config import (
     TEST_SPLIT_FROM_TRAIN,
 )
 
-from src.preprocessing import (
-    train_transform,
-    eval_transform,
-)
+# from src.preprocessing import (
+#     train_transform,
+#     eval_transform,
+# )
+from src.preprocessing import get_transforms
 
 
 # =========================================================
 # CREATE DATASETS
 # =========================================================
 
-def create_datasets():
+# def create_datasets():
+def create_datasets(model_name="resnet50"):
     """
     Creates training, validation and test datasets.
 
@@ -42,7 +44,9 @@ def create_datasets():
         test  = 16%
         val   = 20%
     """
-
+    train_transform, eval_transform = get_transforms(
+        model_name
+    )
     # -----------------------------------------------------
     # Load original training directory WITHOUT transforms.
     #
@@ -131,7 +135,8 @@ def create_datasets():
 # CREATE DATALOADERS
 # =========================================================
 
-def create_dataloaders():
+# def create_dataloaders():
+def create_dataloaders(model_name="resnet50"):
     """
     Creates PyTorch DataLoaders for training,
     validation and testing.
@@ -143,7 +148,7 @@ def create_dataloaders():
         test_dataset,
         class_names,
         class_to_idx,
-    ) = create_datasets()
+    )  = create_datasets(model_name)
 
     train_loader = DataLoader(
         train_dataset,
@@ -191,7 +196,7 @@ def verify_dataset():
         test_dataset,
         class_names,
         class_to_idx,
-    ) = create_datasets()
+    )  = create_datasets("resnet50")
 
     print("\n========== DATASET SUMMARY ==========\n")
 
