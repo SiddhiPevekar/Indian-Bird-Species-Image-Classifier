@@ -1,4 +1,4 @@
-from pathlib import Path
+import argparse
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -26,32 +26,54 @@ from src.config import (
 )
 
 from src.data import create_dataloaders
-from src.models import build_resnet50
+from src.models import build_model
 
 
 # =========================================================
-# LOAD TRAINED RESNET50
+# DISPLAY NAMES
 # =========================================================
 
-def load_resnet50():
+MODEL_DISPLAY_NAMES = {
+    "resnet50": "ResNet50",
+    "efficientnet_v2_b0": "EfficientNetV2-B0",
+    "mobilenet_v2": "MobileNetV2",
+    "vit_b32": "ViT-B/32",
+}
+
+
+# =========================================================
+# LOAD MODEL
+# =========================================================
+
+def load_model(model_name):
     """
-    Rebuild the ResNet50 architecture and load
-    our best trained checkpoint.
+    Builds the selected architecture and loads its
+    trained checkpoint.
+
+    pretrained=False is intentional because our checkpoint
+    already contains the complete model state.
     """
 
-    model = build_resnet50(
-        freeze_backbone=True
+    model = build_model(
+        model_name=model_name,
+        freeze_backbone=True,
+        pretrained=False,
     )
 
-    model_path = (
+    checkpoint_path = (
         MODEL_DIR
-        / "resnet50_best.pth"
+        / f"{model_name}_best.pth"
     )
 
-    # Load only the saved model weights.
+    if not checkpoint_path.exists():
+
+        raise FileNotFoundError(
+            f"Checkpoint not found: {checkpoint_path}"
+        )
+
     state_dict = torch.load(
-        model_path,
-        map_location=DEVICE,
+        checkpoint_path,
+        map_location="cpu",
         weights_only=True,
     )
 
@@ -61,28 +83,27 @@ def load_resnet50():
 
     model = model.to(DEVICE)
 
-    # Disable dropout and put BatchNorm layers
-    # into inference mode.
     model.eval()
 
     return model
 
 
 # =========================================================
-# GET MODEL PREDICTIONS
+# PREDICTIONS
 # =========================================================
 
 def get_predictions(
     model,
     dataloader,
+    model_name,
 ):
     """
-    Runs inference over the complete test dataset.
+    Runs inference across the complete test set.
 
     Returns:
         true labels
         predicted labels
-        class probabilities
+        probability vectors
     """
 
     all_labels = []
@@ -95,129 +116,178 @@ def get_predictions(
 
         for images, labels in tqdm(
             dataloader,
-            desc="Testing ResNet50",
+            desc=f"Testing {model_name}",
         ):
 
             images = images.to(DEVICE)
 
-            # Raw output scores / logits.
             outputs = model(images)
 
-            # Convert logits into probabilities.
             probabilities = torch.softmax(
                 outputs,
                 dim=1,
             )
 
-            # Highest probability class.
             predictions = torch.argmax(
                 probabilities,
                 dim=1,
             )
 
-            all_labels.extend(
-                labels.cpu().numpy()
+            all_labels.append(
+                labels.numpy()
             )
 
-            all_predictions.extend(
+            all_predictions.append(
                 predictions.cpu().numpy()
             )
 
-            all_probabilities.extend(
+            all_probabilities.append(
                 probabilities.cpu().numpy()
             )
 
+    labels = np.concatenate(
+        all_labels
+    )
+
+    predictions = np.concatenate(
+        all_predictions
+    )
+
+    probabilities = np.concatenate(
+        all_probabilities
+    )
+
     return (
-        np.array(all_labels),
-        np.array(all_predictions),
-        np.array(all_probabilities),
+        labels,
+        predictions,
+        probabilities,
     )
 
 
 # =========================================================
-# CALCULATE METRICS
+# METRICS
 # =========================================================
 
 def calculate_metrics(
+    model_name,
     labels,
     predictions,
     probabilities,
 ):
-    """
-    Calculates the metrics used in the original project.
-    """
-
-    accuracy = accuracy_score(
-        labels,
-        predictions,
-    )
-
-    top3_accuracy = top_k_accuracy_score(
-        labels,
-        probabilities,
-        k=3,
-        labels=list(range(NUM_CLASSES)),
-    )
-
-    # Dataset is class-balanced.
-    # Macro averaging gives equal importance to each species.
-
-    precision = precision_score(
-        labels,
-        predictions,
-        average="macro",
-        zero_division=0,
-    )
-
-    recall = recall_score(
-        labels,
-        predictions,
-        average="macro",
-        zero_division=0,
-    )
-
-    f1 = f1_score(
-        labels,
-        predictions,
-        average="macro",
-        zero_division=0,
-    )
-
-    mcc = matthews_corrcoef(
-        labels,
-        predictions,
-    )
 
     return {
-        "Model": "ResNet50",
-        "Accuracy": accuracy,
-        "Top-3 Accuracy": top3_accuracy,
-        "Precision": precision,
-        "Recall": recall,
-        "F1 Score": f1,
-        "MCC": mcc,
+        "Model": MODEL_DISPLAY_NAMES[model_name],
+
+        "Accuracy": accuracy_score(
+            labels,
+            predictions,
+        ),
+
+        "Top-3 Accuracy": top_k_accuracy_score(
+            labels,
+            probabilities,
+            k=3,
+            labels=list(range(NUM_CLASSES)),
+        ),
+
+        "Precision": precision_score(
+            labels,
+            predictions,
+            average="macro",
+            zero_division=0,
+        ),
+
+        "Recall": recall_score(
+            labels,
+            predictions,
+            average="macro",
+            zero_division=0,
+        ),
+
+        "F1 Score": f1_score(
+            labels,
+            predictions,
+            average="macro",
+            zero_division=0,
+        ),
+
+        "MCC": matthews_corrcoef(
+            labels,
+            predictions,
+        ),
     }
 
 
 # =========================================================
-# SAVE CONFUSION MATRIX
+# SAVE METRICS
+# =========================================================
+
+def save_metrics(metrics):
+    """
+    Adds or updates this model inside metrics.csv.
+    """
+
+    RESULTS_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    output_path = (
+        RESULTS_DIR
+        / "metrics.csv"
+    )
+
+    new_row = pd.DataFrame(
+        [metrics]
+    )
+
+    if output_path.exists():
+
+        existing = pd.read_csv(
+            output_path
+        )
+
+        # Remove old result for same model
+        existing = existing[
+            existing["Model"]
+            != metrics["Model"]
+        ]
+
+        dataframe = pd.concat(
+            [
+                existing,
+                new_row,
+            ],
+            ignore_index=True,
+        )
+
+    else:
+
+        dataframe = new_row
+
+    dataframe.to_csv(
+        output_path,
+        index=False,
+    )
+
+
+# =========================================================
+# CONFUSION MATRIX
 # =========================================================
 
 def save_confusion_matrix(
+    model_name,
     labels,
     predictions,
     class_names,
 ):
-    """
-    Generates and saves the ResNet50 confusion matrix.
-    """
 
-    output_directory = (
+    output_dir = (
         RESULTS_DIR
         / "confusion_matrices"
     )
 
-    output_directory.mkdir(
+    output_dir.mkdir(
         parents=True,
         exist_ok=True,
     )
@@ -227,7 +297,6 @@ def save_confusion_matrix(
         predictions,
     )
 
-    # Larger figure because we have 25 species.
     fig, ax = plt.subplots(
         figsize=(16, 16)
     )
@@ -244,14 +313,14 @@ def save_confusion_matrix(
     )
 
     ax.set_title(
-        "ResNet50 Confusion Matrix"
+        f"{MODEL_DISPLAY_NAMES[model_name]} Confusion Matrix"
     )
 
     plt.tight_layout()
 
     output_path = (
-        output_directory
-        / "resnet50_confusion_matrix.png"
+        output_dir
+        / f"{model_name}_confusion_matrix.png"
     )
 
     plt.savefig(
@@ -262,57 +331,64 @@ def save_confusion_matrix(
 
     plt.close()
 
-    print(
-        f"Confusion matrix saved to:\n"
-        f"{output_path}"
+
+# =========================================================
+# SAVE PROBABILITIES
+# =========================================================
+
+def save_predictions(
+    model_name,
+    labels,
+    predictions,
+    probabilities,
+):
+    """
+    Saves probability outputs.
+
+    These are important because Step 9 will combine
+    probabilities from all four models to create our
+    linear and geometric ensembles.
+    """
+
+    output_dir = (
+        RESULTS_DIR
+        / "predictions"
     )
 
-
-# =========================================================
-# SAVE METRICS
-# =========================================================
-
-def save_metrics(metrics):
-    """
-    Stores model metrics in CSV format.
-
-    Later EfficientNet, MobileNet, ViT and ensembles
-    will be added to the same comparison table.
-    """
-
-    RESULTS_DIR.mkdir(
+    output_dir.mkdir(
         parents=True,
         exist_ok=True,
     )
 
     output_path = (
-        RESULTS_DIR
-        / "metrics.csv"
+        output_dir
+        / f"{model_name}_predictions.npz"
     )
 
-    dataframe = pd.DataFrame(
-        [metrics]
-    )
-
-    dataframe.to_csv(
+    np.savez_compressed(
         output_path,
-        index=False,
+        labels=labels,
+        predictions=predictions,
+        probabilities=probabilities,
     )
 
     print(
-        f"\nMetrics saved to:\n"
-        f"{output_path}"
+        f"Predictions saved: {output_path}"
     )
 
 
 # =========================================================
-# EVALUATE RESNET50
+# EVALUATE
 # =========================================================
 
-def evaluate_resnet50():
+def evaluate_model(
+    model_name,
+):
 
     print(
-        "\n========== RESNET50 TEST EVALUATION ==========\n"
+        f"\n========== "
+        f"{MODEL_DISPLAY_NAMES[model_name]} "
+        f"TEST EVALUATION ==========\n"
     )
 
     print(
@@ -325,26 +401,22 @@ def evaluate_resnet50():
         test_loader,
         class_names,
         _,
-    ) = create_dataloaders()
+    ) = create_dataloaders(
+        model_name
+    )
 
     print(
         f"Test images: "
         f"{len(test_loader.dataset)}"
     )
 
-    # ---------------------------------------------
-    # Load best checkpoint
-    # ---------------------------------------------
-
-    model = load_resnet50()
-
-    print(
-        "Loaded best ResNet50 checkpoint."
+    model = load_model(
+        model_name
     )
 
-    # ---------------------------------------------
-    # Predictions
-    # ---------------------------------------------
+    print(
+        "Checkpoint loaded."
+    )
 
     (
         labels,
@@ -353,45 +425,74 @@ def evaluate_resnet50():
     ) = get_predictions(
         model,
         test_loader,
+        model_name,
     )
 
-    # ---------------------------------------------
-    # Metrics
-    # ---------------------------------------------
-
     metrics = calculate_metrics(
+        model_name,
         labels,
         predictions,
         probabilities,
     )
 
     print(
-        "\n========== TEST RESULTS ==========\n"
+        "\n========== RESULTS ==========\n"
     )
 
-    for metric_name, value in metrics.items():
+    for name, value in metrics.items():
 
-        if metric_name == "Model":
+        if name == "Model":
             continue
 
         print(
-            f"{metric_name:16s}: "
-            f"{value:.4f}"
+            f"{name:16s}: {value:.4f}"
         )
-
-    # ---------------------------------------------
-    # Save results
-    # ---------------------------------------------
 
     save_metrics(
         metrics
     )
 
     save_confusion_matrix(
+        model_name,
         labels,
         predictions,
         class_names,
     )
+
+    save_predictions(
+        model_name,
+        labels,
+        predictions,
+        probabilities,
+    )
+
+    print(
+        "\nEvaluation complete."
+    )
+
+
+# =========================================================
+# ARGUMENTS
+# =========================================================
+
+def parse_arguments():
+
+    parser = argparse.ArgumentParser(
+        description="Evaluate bird classification model"
+    )
+
+    parser.add_argument(
+        "--model",
+        required=True,
+        choices=[
+            "resnet50",
+            "efficientnet_v2_b0",
+            "mobilenet_v2",
+            "vit_b32",
+        ],
+    )
+
+    return parser.parse_args()
 
 
 # =========================================================
@@ -400,4 +501,8 @@ def evaluate_resnet50():
 
 if __name__ == "__main__":
 
-    evaluate_resnet50()
+    args = parse_arguments()
+
+    evaluate_model(
+        args.model
+    )

@@ -12,23 +12,22 @@ env/
 # macOS
 .DS_Store
 
-# Jupyter
-.ipynb_checkpoints/
-
 # VS Code
 .vscode/
 
+# Jupyter
+.ipynb_checkpoints/
+
 # Dataset
 data/
-dataset/
 
-# Trained models
+# Trained model checkpoints
 models/*.pth
 models/*.pt
 models/*.ckpt
 
+# Streamlit secrets
+.streamlit/secrets.toml
+
 # Logs
 *.log
-
-# Streamlit
-.streamlit/secrets.toml
